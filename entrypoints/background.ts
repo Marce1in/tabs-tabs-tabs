@@ -16,6 +16,12 @@ import {
 } from '@/utils/tab-organizer';
 
 const TAB_GROUP_ID_NONE = -1;
+const AUTO_ORGANIZE_ALARM = 'tabs-tabs-tabs:auto-organize';
+const AUTO_ORGANIZE_PERIOD_MINUTES = 5;
+const TAB_TITLE_SIGNATURE_KEY = 'tabsTabsTabs.lastTabTitleSignature';
+
+let isAutoOrganizing = false;
+
 interface ApplyOrganizationResult {
   appliedGroups: number;
   groupedTabs: number;
@@ -29,6 +35,20 @@ export default defineBackground(() => {
     return handleExtensionMessage(message);
   });
 
+  browser.runtime.onInstalled.addListener(() => {
+    void ensureAutoOrganizeAlarm();
+  });
+  browser.runtime.onStartup?.addListener(() => {
+    void ensureAutoOrganizeAlarm();
+  });
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === AUTO_ORGANIZE_ALARM) {
+      void autoOrganizeIfTabsChanged();
+    }
+  });
+
+  void ensureAutoOrganizeAlarm();
+  void seedInitialTabTitleSignature();
 });
 
 async function handleExtensionMessage(
@@ -75,6 +95,8 @@ async function organizeAndApply(): Promise<OrganizationRunResponse> {
     tabs,
   });
   const result = await applyOrganizationPlan(plan);
+  await saveTabTitleSignature(buildTabTitleSignature(tabs));
+
   return {
     ...result,
     tabsAnalyzed: tabs.length,
@@ -82,6 +104,64 @@ async function organizeAndApply(): Promise<OrganizationRunResponse> {
     generatedAt: new Date().toISOString(),
     warnings,
   };
+}
+
+async function autoOrganizeIfTabsChanged(): Promise<void> {
+  if (isAutoOrganizing) return;
+
+  isAutoOrganizing = true;
+
+  try {
+    const settings = await getOpenRouterSettings();
+    if (!settings.apiKey) return;
+
+    const tabs = await collectEligibleTabs();
+    if (tabs.length < 2) {
+      await saveTabTitleSignature(buildTabTitleSignature(tabs));
+      return;
+    }
+
+    const currentSignature = buildTabTitleSignature(tabs);
+    const previousSignature = await getSavedTabTitleSignature();
+    if (!previousSignature) {
+      await saveTabTitleSignature(currentSignature);
+      return;
+    }
+    if (currentSignature === previousSignature) return;
+
+    const { plan } = await requestOrganizationPlan({
+      settings,
+      tabs,
+    });
+    await applyOrganizationPlan(plan);
+    await saveTabTitleSignature(currentSignature);
+  } catch (error) {
+    console.warn('Falha ao organizar abas automaticamente.', error);
+  } finally {
+    isAutoOrganizing = false;
+  }
+}
+
+async function ensureAutoOrganizeAlarm(): Promise<void> {
+  const existingAlarm = await browser.alarms.get(AUTO_ORGANIZE_ALARM);
+  if (existingAlarm) return;
+
+  await browser.alarms.create(AUTO_ORGANIZE_ALARM, {
+    delayInMinutes: AUTO_ORGANIZE_PERIOD_MINUTES,
+    periodInMinutes: AUTO_ORGANIZE_PERIOD_MINUTES,
+  });
+}
+
+async function seedInitialTabTitleSignature(): Promise<void> {
+  const existingSignature = await getSavedTabTitleSignature();
+  if (existingSignature) return;
+
+  try {
+    const tabs = await collectEligibleTabs();
+    await saveTabTitleSignature(buildTabTitleSignature(tabs));
+  } catch {
+    // The browser may not have a normal focused window when the service worker starts.
+  }
 }
 
 async function applyOrganizationPlan(plan: OrganizationPlan): Promise<ApplyOrganizationResult> {
@@ -200,3 +280,23 @@ function toTabsApiTabIds(tabIds: number[]): number | [number, ...number[]] {
   return tabIds as [number, ...number[]];
 }
 
+function buildTabTitleSignature(tabs: SanitizedTab[]): string {
+  return JSON.stringify(
+    tabs.map((tab) => ({
+      id: tab.id,
+      title: tab.title,
+      url: tab.url,
+    })),
+  );
+}
+
+async function getSavedTabTitleSignature(): Promise<string> {
+  const stored = await browser.storage.local.get(TAB_TITLE_SIGNATURE_KEY);
+  return typeof stored[TAB_TITLE_SIGNATURE_KEY] === 'string' ? stored[TAB_TITLE_SIGNATURE_KEY] : '';
+}
+
+async function saveTabTitleSignature(signature: string): Promise<void> {
+  await browser.storage.local.set({
+    [TAB_TITLE_SIGNATURE_KEY]: signature,
+  });
+}

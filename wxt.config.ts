@@ -9,7 +9,7 @@ export default defineConfig({
     action: {
       default_title: 'Tabs Tabs Tabs',
     },
-    permissions: ['storage', 'tabs', 'tabGroups'],
+    permissions: ['storage', 'tabs', 'tabGroups', 'alarms'],
     host_permissions: ['https://openrouter.ai/*'],
   },
 });
