@@ -24,3 +24,8 @@ web-ext.config.ts
 *.njsproj
 *.sln
 *.sw?
+
+# Local env files (WXT/Vite loads these). Commit .env.example, not your real .env.
+.env
+.env.local
+.env.*.local
