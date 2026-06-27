@@ -4,9 +4,11 @@ import {
   type ExtensionRequest,
   type OrganizationRunResponse,
   type SettingsResponse,
+  type SyncStatusResponse,
 } from '@/utils/messages';
 import { requestOrganizationPlan } from '@/utils/openrouter';
 import { getOpenRouterSettings, saveOpenRouterSettings } from '@/utils/settings';
+import { createTabSyncController, type TabSyncController } from '@/utils/tab-sync';
 import {
   countGroupedTabs,
   normalizeOrganizationPlan,
@@ -21,6 +23,7 @@ const AUTO_ORGANIZE_PERIOD_MINUTES = 5;
 const TAB_TITLE_SIGNATURE_KEY = 'tabsTabsTabs.lastTabTitleSignature';
 
 let isAutoOrganizing = false;
+let tabSyncController: TabSyncController | null = null;
 
 interface ApplyOrganizationResult {
   appliedGroups: number;
@@ -30,6 +33,8 @@ interface ApplyOrganizationResult {
 }
 
 export default defineBackground(() => {
+  tabSyncController = createTabSyncController();
+
   browser.runtime.onMessage.addListener((message) => {
     if (!isExtensionRequest(message)) return undefined;
     return handleExtensionMessage(message);
@@ -49,11 +54,12 @@ export default defineBackground(() => {
 
   void ensureAutoOrganizeAlarm();
   void seedInitialTabTitleSignature();
+  void tabSyncController.start();
 });
 
 async function handleExtensionMessage(
   message: ExtensionRequest,
-): Promise<SettingsResponse | OrganizationRunResponse> {
+): Promise<SettingsResponse | OrganizationRunResponse | SyncStatusResponse> {
   switch (message.type) {
     case 'settings:get':
       return getSettingsResponse();
@@ -68,6 +74,9 @@ async function handleExtensionMessage(
 
     case 'organize:run':
       return organizeAndApply();
+
+    case 'sync:status:get':
+      return getSyncStatusResponse();
   }
 }
 
@@ -96,6 +105,7 @@ async function organizeAndApply(): Promise<OrganizationRunResponse> {
   });
   const result = await applyOrganizationPlan(plan);
   await saveTabTitleSignature(buildTabTitleSignature(tabs));
+  tabSyncController?.schedulePublish();
 
   return {
     ...result,
@@ -104,6 +114,19 @@ async function organizeAndApply(): Promise<OrganizationRunResponse> {
     generatedAt: new Date().toISOString(),
     warnings,
   };
+}
+
+async function getSyncStatusResponse(): Promise<SyncStatusResponse> {
+  return (
+    tabSyncController?.getStatus() ?? {
+      clientId: '',
+      state: 'idle',
+      message: 'Sync ainda não inicializado.',
+      globalTabs: 0,
+      connectedClients: 0,
+      lastSyncedAt: '',
+    }
+  );
 }
 
 async function autoOrganizeIfTabsChanged(): Promise<void> {
@@ -264,7 +287,7 @@ function assertTabGroupApisAvailable(): void {
 
 function isExtensionRequest(message: unknown): message is ExtensionRequest {
   if (!isRecord(message) || typeof message.type !== 'string') return false;
-  return ['settings:get', 'settings:save', 'organize:run'].includes(message.type);
+  return ['settings:get', 'settings:save', 'organize:run', 'sync:status:get'].includes(message.type);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

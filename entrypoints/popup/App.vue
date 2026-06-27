@@ -5,6 +5,7 @@ import {
   EyeOff,
   KeyRound,
   LoaderCircle,
+  RadioTower,
   Save,
   Sparkles,
 } from '@lucide/vue';
@@ -13,6 +14,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import {
   type OrganizationRunResponse,
   type SettingsResponse,
+  type SyncStatusResponse,
   sendExtensionMessage,
 } from '@/utils/messages';
 import { DEFAULT_MODEL } from '@/utils/settings';
@@ -29,11 +31,16 @@ const isKeyVisible = ref(false);
 const statusMessage = ref('');
 const errorMessage = ref('');
 const applyResult = ref<OrganizationRunResponse | null>(null);
+const syncStatus = ref<SyncStatusResponse | null>(null);
 
 const canOrganize = computed(() => Boolean(settings.apiKey.trim()) && !isGenerating.value);
 
 onMounted(() => {
   void loadSettings();
+  void loadSyncStatus();
+  window.setInterval(() => {
+    void loadSyncStatus();
+  }, 2500);
 });
 
 async function loadSettings(): Promise<void> {
@@ -72,6 +79,21 @@ async function organizeNow(): Promise<void> {
   });
 
   isGenerating.value = false;
+}
+
+async function loadSyncStatus(): Promise<void> {
+  try {
+    syncStatus.value = await sendExtensionMessage<SyncStatusResponse>({ type: 'sync:status:get' });
+  } catch {
+    syncStatus.value = {
+      clientId: '',
+      state: 'error',
+      message: 'Não foi possível ler o status do sync.',
+      globalTabs: 0,
+      connectedClients: 0,
+      lastSyncedAt: '',
+    };
+  }
 }
 
 async function runTask(task: () => Promise<void>): Promise<void> {
@@ -138,6 +160,28 @@ function getErrorMessage(error: unknown): string {
           <span>{{ isSaving ? 'Salvando' : 'Salvar' }}</span>
         </button>
       </form>
+    </section>
+
+    <section class="panel sync-panel" aria-labelledby="sync-title">
+      <div class="section-heading">
+        <RadioTower :size="17" aria-hidden="true" />
+        <h2 id="sync-title">Tab Sync</h2>
+      </div>
+
+      <div class="sync-grid" aria-live="polite">
+        <div>
+          <span>Status</span>
+          <strong>{{ syncStatus?.state ?? 'idle' }}</strong>
+        </div>
+        <div>
+          <span>Globais</span>
+          <strong>{{ syncStatus?.globalTabs ?? 0 }}</strong>
+        </div>
+        <div>
+          <span>Clientes</span>
+          <strong>{{ syncStatus?.connectedClients ?? 0 }}</strong>
+        </div>
+      </div>
     </section>
 
     <section class="actions-panel" aria-label="Organizar agora">

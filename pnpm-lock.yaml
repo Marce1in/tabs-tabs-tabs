@@ -11,6 +11,9 @@ importers:
       '@lucide/vue':
         specifier: ^1.20.0
         version: 1.20.0(vue@3.5.38(typescript@5.9.3))
+      phoenix:
+        specifier: ^1.8.8
+        version: 1.8.8
       vue:
         specifier: ^3.5.29
         version: 3.5.38(typescript@5.9.3)
@@ -1365,6 +1368,9 @@ packages:
 
   perfect-debounce@2.1.0:
     resolution: {integrity: sha512-LjgdTytVFXeUgtHZr9WYViYSM/g8MkcTPYDlPa3cDqMirHjKiSZPYd6DoL7pK8AJQr+uWkQvCjHNdiMqsrJs+g==}
+
+  phoenix@1.8.8:
+    resolution: {integrity: sha512-dHbnj+eERgKqDu1dACsJNp4JWxtWO+598STHaGPhzA5DqNG4jeq5WmkjXsaMYsDMFEsygtFovdrhVtDHTN7V+A==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -3082,6 +3088,8 @@ snapshots:
   pathe@2.0.3: {}
 
   perfect-debounce@2.1.0: {}
+
+  phoenix@1.8.8: {}
 
   picocolors@1.1.1: {}
 

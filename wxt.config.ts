@@ -10,6 +10,10 @@ export default defineConfig({
       default_title: 'Tabs Tabs Tabs',
     },
     permissions: ['storage', 'tabs', 'tabGroups', 'alarms'],
-    host_permissions: ['https://openrouter.ai/*'],
+    host_permissions: [
+      'https://openrouter.ai/*',
+      'http://localhost:4000/*',
+      'http://127.0.0.1:4000/*',
+    ],
   },
 });

@@ -118,6 +118,10 @@ input:disabled {
   padding: 13px;
 }
 
+.sync-panel {
+  padding: 13px;
+}
+
 .section-heading,
 .result {
   display: flex;
@@ -210,6 +214,39 @@ input:disabled {
 
 .actions-panel {
   display: grid;
+}
+
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sync-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(22, 116, 95, 0.16);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: rgba(22, 116, 95, 0.06);
+}
+
+.sync-grid span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sync-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notice {
