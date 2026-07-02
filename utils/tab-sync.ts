@@ -1,11 +1,11 @@
 import { Channel, Socket } from 'phoenix';
 import { browser, type Browser } from 'wxt/browser';
 
-import type { SyncStatusResponse } from './messages';
+import { getGitHubAuthState, type GitHubAuthState } from './auth';
+import type { OrganizationRunResponse, SyncStatusResponse } from './messages';
 import type { TabGroupColor } from './tab-organizer';
 
 const DEFAULT_SYNC_SOCKET_URL = 'ws://localhost:4000/socket';
-const SYNC_CHANNEL_TOPIC = 'tabs:global';
 const SYNC_CLIENT_ID_KEY = 'tabsTabsTabs.syncClientId';
 const SYNC_WINDOW_ID_KEY = 'tabsTabsTabs.syncWindowId';
 const SYNC_TAB_KEY_MAP_KEY = 'tabsTabsTabs.syncTabKeys';
@@ -64,7 +64,10 @@ type SyncStatusState = SyncStatusResponse['state'];
 
 export interface TabSyncController {
   start: () => Promise<void>;
+  stop: () => void;
+  restart: () => Promise<void>;
   schedulePublish: () => void;
+  organizeNow: () => Promise<OrganizationRunResponse>;
   getStatus: () => SyncStatusResponse;
 }
 
@@ -83,9 +86,11 @@ export interface RemoteTabApplication {
 export function createTabSyncController(): TabSyncController {
   let socket: Socket | null = null;
   let channel: Channel | null = null;
+  let authState: GitHubAuthState | null = null;
   let clientId = '';
   let publishTimer: ReturnType<typeof setTimeout> | null = null;
   let isApplyingRemoteSync = false;
+  let areBrowserListenersRegistered = false;
   let ignoreLocalEventsUntil = 0;
   let statusState: SyncStatusState = 'idle';
   let statusMessage = 'Sync aguardando inicialização.';
@@ -97,11 +102,18 @@ export function createTabSyncController(): TabSyncController {
   async function start(): Promise<void> {
     if (socket || channel) return;
 
+    authState = await getGitHubAuthState();
+    if (!authState) {
+      setStatus('idle', 'Entre com GitHub para sincronizar abas.');
+      return;
+    }
+
     clientId = await getOrCreateClientId();
     setStatus('connecting', 'Conectando ao sync.');
 
     socket = new Socket(getSyncSocketUrl(), {
       params: {
+        auth_token: authState.token,
         client_id: clientId,
         client_label: await getClientLabel(),
       },
@@ -112,10 +124,32 @@ export function createTabSyncController(): TabSyncController {
     socket.onClose(() => setStatus('disconnected', 'Sync desconectado.'));
 
     socket.connect();
-    channel = socket.channel(SYNC_CHANNEL_TOPIC);
+    channel = socket.channel(`tabs:user:${authState.userId}`);
     registerChannelHandlers(channel);
     joinChannel(channel);
     registerBrowserListeners();
+  }
+
+  function stop(): void {
+    if (publishTimer) {
+      clearTimeout(publishTimer);
+      publishTimer = null;
+    }
+
+    channel?.leave();
+    socket?.disconnect();
+    channel = null;
+    socket = null;
+    authState = null;
+    presenceState = {};
+    connectedClients = 0;
+    globalTabs = 0;
+    setStatus('idle', 'Sync desconectado.');
+  }
+
+  async function restart(): Promise<void> {
+    stop();
+    await start();
   }
 
   function schedulePublish(): void {
@@ -177,6 +211,8 @@ export function createTabSyncController(): TabSyncController {
   }
 
   function registerBrowserListeners(): void {
+    if (areBrowserListenersRegistered) return;
+
     browser.tabs.onCreated.addListener(schedulePublish);
     browser.tabs.onUpdated.addListener((_tabId, changeInfo) => {
       if (changeInfo.url || changeInfo.title || changeInfo.status === 'complete') schedulePublish();
@@ -193,34 +229,67 @@ export function createTabSyncController(): TabSyncController {
     tabGroupsApi?.onUpdated?.addListener(schedulePublish);
     tabGroupsApi?.onMoved?.addListener(schedulePublish);
     tabGroupsApi?.onRemoved?.addListener(schedulePublish);
+    areBrowserListenersRegistered = true;
   }
 
-  async function publishLocalState(): Promise<void> {
+  async function publishLocalState(throwOnError = false): Promise<void> {
     if (shouldIgnoreLocalEvent(isApplyingRemoteSync, ignoreLocalEventsUntil, Date.now())) return;
     if (!channel || statusState === 'disconnected') return;
 
     try {
       const localState = await collectLocalSyncState();
+      await deleteStaleKnownTabs(localState.tabs, channel);
       await saveKnownTabKeys(localState.tabs);
       await saveKnownTabFingerprints(localState.tabs);
       await saveGroupMaps(localState.groupMaps);
 
-      channel
-        .push('tabs:upsert', {
-          tabs: localState.tabs.map(stripLocalTabFields),
-          groups: localState.groups,
-        })
-        .receive('ok', (response) => {
-          globalTabs = readReplyState(response).tabs.length || localState.tabs.length;
-          markSynced();
-        })
-        .receive('error', () => {
-          setStatus('error', 'O backend recusou o estado local.');
-        });
+      const response = await pushWithReply(channel, 'tabs:upsert', {
+        tabs: localState.tabs.map(stripLocalTabFields),
+        groups: localState.groups,
+      });
+
+      globalTabs = readReplyState(response).tabs.length || localState.tabs.length;
+      markSynced();
     } catch (error) {
       console.warn('Falha ao publicar abas locais.', error);
       setStatus('error', 'Falha ao publicar abas locais.');
+      if (throwOnError) throw error;
     }
+  }
+
+  async function deleteStaleKnownTabs(localTabs: LocalSyncTab[], activeChannel: Channel): Promise<void> {
+    const knownTabKeys = await getKnownTabKeys();
+    const knownFingerprints = await getKnownTabFingerprints();
+    const staleEntries = findStaleKnownSyncEntries(localTabs, knownTabKeys, knownFingerprints);
+
+    if (staleEntries.tabKeys.length === 0 && staleEntries.fingerprints.length === 0) return;
+
+    await pushWithReply(activeChannel, 'tabs:delete', {
+      tabKeys: staleEntries.tabKeys,
+      fingerprints: staleEntries.fingerprints,
+    });
+
+    for (const tabId of staleEntries.tabIds) {
+      delete knownTabKeys[String(tabId)];
+      delete knownFingerprints[String(tabId)];
+    }
+
+    await browser.storage.local.set({ [SYNC_TAB_KEY_MAP_KEY]: knownTabKeys });
+    await browser.storage.local.set({ [SYNC_TAB_MAP_KEY]: knownFingerprints });
+
+    const syncedCreatedTabIds = await getSyncedCreatedTabIds();
+    for (const tabId of staleEntries.tabIds) syncedCreatedTabIds.delete(tabId);
+    await saveSyncedCreatedTabIds(syncedCreatedTabIds);
+  }
+
+  async function organizeNow(): Promise<OrganizationRunResponse> {
+    if (!channel) throw new Error('Entre com GitHub e aguarde o sync conectar antes de organizar.');
+
+    await publishLocalState(true);
+    const response = await pushWithReply(channel, 'tabs:organize_now', {});
+    const organizationResult = readOrganizationRunResponse(response);
+    await handleRemoteState(readReplyState(response));
+    return organizationResult;
   }
 
   async function requestRemoteState(): Promise<void> {
@@ -423,9 +492,22 @@ export function createTabSyncController(): TabSyncController {
 
   return {
     start,
+    stop,
+    restart,
     schedulePublish,
+    organizeNow,
     getStatus,
   };
+}
+
+export async function clearStoredSyncMetadata(): Promise<void> {
+  await browser.storage.local.remove([
+    SYNC_WINDOW_ID_KEY,
+    SYNC_TAB_KEY_MAP_KEY,
+    SYNC_TAB_MAP_KEY,
+    SYNC_CREATED_TAB_IDS_KEY,
+    SYNC_GROUP_MAP_KEY,
+  ]);
 }
 
 export async function collectLocalSyncState(): Promise<{
@@ -595,6 +677,35 @@ export function findSyncedDuplicateTabIds(
   return duplicateTabIds;
 }
 
+export function findStaleKnownSyncEntries(
+  currentTabs: Array<{ tabId: number }>,
+  knownTabKeys: Record<string, string>,
+  knownFingerprints: Record<string, string>,
+): { tabIds: number[]; tabKeys: string[]; fingerprints: string[] } {
+  const currentTabIds = new Set(currentTabs.map((tab) => String(tab.tabId)));
+  const staleTabIds = new Set<string>();
+
+  for (const tabId of Object.keys(knownTabKeys)) {
+    if (!currentTabIds.has(tabId)) staleTabIds.add(tabId);
+  }
+
+  for (const tabId of Object.keys(knownFingerprints)) {
+    if (!currentTabIds.has(tabId)) staleTabIds.add(tabId);
+  }
+
+  const tabIds = [...staleTabIds]
+    .map((tabId) => Number(tabId))
+    .filter((tabId) => Number.isInteger(tabId));
+
+  return {
+    tabIds,
+    tabKeys: [...new Set([...staleTabIds].map((tabId) => knownTabKeys[tabId]).filter(isNonEmptyString))],
+    fingerprints: [
+      ...new Set([...staleTabIds].map((tabId) => knownFingerprints[tabId]).filter(isNonEmptyString)),
+    ],
+  };
+}
+
 function readSyncState(payload: unknown): SyncStatePayload {
   if (!isRecord(payload)) return { tabs: [], groups: [] };
 
@@ -607,6 +718,27 @@ function readSyncState(payload: unknown): SyncStatePayload {
 function readReplyState(payload: unknown): SyncStatePayload {
   if (isRecord(payload) && isRecord(payload.state)) return readSyncState(payload.state);
   return readSyncState(payload);
+}
+
+function readOrganizationRunResponse(payload: unknown): OrganizationRunResponse {
+  if (!isRecord(payload)) throw new Error('O backend retornou uma resposta inválida.');
+
+  return {
+    tabsAnalyzed: readNumber(payload.tabsAnalyzed),
+    model: typeof payload.model === 'string' ? payload.model : '',
+    generatedAt: typeof payload.generatedAt === 'string' ? payload.generatedAt : new Date().toISOString(),
+    warnings: Array.isArray(payload.warnings)
+      ? payload.warnings.filter((warning): warning is string => typeof warning === 'string')
+      : [],
+    appliedGroups: readNumber(payload.appliedGroups),
+    groupedTabs: readNumber(payload.groupedTabs),
+    ungroupedTabs: readNumber(payload.ungroupedTabs),
+    skippedTabs: readNumber(payload.skippedTabs),
+  };
+}
+
+function readNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function readSyncUpsert(payload: unknown): SyncUpsertPayload | null {
@@ -987,6 +1119,10 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((entry) => typeof entry === 'string');
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -998,6 +1134,25 @@ function isInteger(value: unknown): value is number {
 function toTabsApiTabIds(tabIds: number[]): number | [number, ...number[]] {
   if (tabIds.length === 1) return tabIds[0];
   return tabIds as [number, ...number[]];
+}
+
+function pushWithReply(activeChannel: Channel, event: string, payload: Record<string, unknown>): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    activeChannel
+      .push(event, payload)
+      .receive('ok', resolve)
+      .receive('error', (response) => {
+        reject(new Error(readChannelError(response)));
+      })
+      .receive('timeout', () => {
+        reject(new Error('Timeout ao comunicar com o backend de sync.'));
+      });
+  });
+}
+
+function readChannelError(response: unknown): string {
+  if (isRecord(response) && typeof response.reason === 'string') return response.reason;
+  return 'O backend recusou a operação de sync.';
 }
 
 type MaybeTabGroupsApi = {

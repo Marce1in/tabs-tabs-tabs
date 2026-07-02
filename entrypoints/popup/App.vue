@@ -1,72 +1,71 @@
 <script lang="ts" setup>
 import {
   Check,
-  Eye,
-  EyeOff,
-  KeyRound,
   LoaderCircle,
+  LogIn,
+  LogOut,
   RadioTower,
-  Save,
   Sparkles,
+  UserRound,
 } from '@lucide/vue';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import {
+  type AuthStatusResponse,
   type OrganizationRunResponse,
-  type SettingsResponse,
   type SyncStatusResponse,
   sendExtensionMessage,
 } from '@/utils/messages';
-import { DEFAULT_MODEL } from '@/utils/settings';
+import type { GitHubAuthState } from '@/utils/auth';
 
-const settings = reactive({
-  apiKey: '',
-  model: DEFAULT_MODEL,
-});
-
-const isLoaded = ref(false);
-const isSaving = ref(false);
 const isGenerating = ref(false);
-const isKeyVisible = ref(false);
+const isSigningIn = ref(false);
 const statusMessage = ref('');
 const errorMessage = ref('');
 const applyResult = ref<OrganizationRunResponse | null>(null);
 const syncStatus = ref<SyncStatusResponse | null>(null);
+const authState = ref<GitHubAuthState | null>(null);
 
-const canOrganize = computed(() => Boolean(settings.apiKey.trim()) && !isGenerating.value);
+const canOrganize = computed(() => Boolean(authState.value) && !isGenerating.value);
+const canSync = computed(() => Boolean(authState.value));
 
 onMounted(() => {
-  void loadSettings();
+  void loadAuthStatus();
   void loadSyncStatus();
   window.setInterval(() => {
     void loadSyncStatus();
   }, 2500);
 });
 
-async function loadSettings(): Promise<void> {
-  await runTask(async () => {
-    const response = await sendExtensionMessage<SettingsResponse>({ type: 'settings:get' });
-    settings.apiKey = response.settings.apiKey;
-    settings.model = response.settings.model;
-    isLoaded.value = true;
-  });
+async function loadAuthStatus(): Promise<void> {
+  try {
+    const response = await sendExtensionMessage<AuthStatusResponse>({ type: 'auth:status:get' });
+    authState.value = response.auth;
+  } catch {
+    authState.value = null;
+  }
 }
 
-async function saveSettings(): Promise<void> {
-  isSaving.value = true;
+async function signInWithGitHub(): Promise<void> {
+  isSigningIn.value = true;
+
   await runTask(async () => {
-    const response = await sendExtensionMessage<SettingsResponse>({
-      type: 'settings:save',
-      settings: {
-        apiKey: settings.apiKey,
-        model: settings.model,
-      },
-    });
-    settings.apiKey = response.settings.apiKey;
-    settings.model = response.settings.model;
-    statusMessage.value = 'Configurações salvas localmente.';
+    const response = await sendExtensionMessage<AuthStatusResponse>({ type: 'auth:github:start' });
+    authState.value = response.auth;
+    statusMessage.value = 'GitHub conectado.';
+    await loadSyncStatus();
   });
-  isSaving.value = false;
+
+  isSigningIn.value = false;
+}
+
+async function signOut(): Promise<void> {
+  await runTask(async () => {
+    const response = await sendExtensionMessage<AuthStatusResponse>({ type: 'auth:logout' });
+    authState.value = response.auth;
+    statusMessage.value = 'GitHub desconectado.';
+    await loadSyncStatus();
+  });
 }
 
 async function organizeNow(): Promise<void> {
@@ -120,46 +119,28 @@ function getErrorMessage(error: unknown): string {
       </div>
     </header>
 
-    <section class="panel settings-panel" aria-labelledby="settings-title">
+    <section class="panel settings-panel" aria-labelledby="account-title">
       <div class="section-heading">
-        <KeyRound :size="17" aria-hidden="true" />
-        <h2 id="settings-title">OpenRouter</h2>
+        <UserRound :size="17" aria-hidden="true" />
+        <h2 id="account-title">GitHub</h2>
       </div>
 
-      <form class="settings-form" @submit.prevent="saveSettings">
-        <label class="field">
-          <span>Chave da API</span>
-          <div class="secret-input">
-            <input
-              v-model="settings.apiKey"
-              :type="isKeyVisible ? 'text' : 'password'"
-              autocomplete="off"
-              placeholder="sk-or-v1..."
-              :disabled="!isLoaded"
-            />
-            <button
-              class="icon-button"
-              type="button"
-              :aria-label="isKeyVisible ? 'Ocultar chave da API' : 'Mostrar chave da API'"
-              @click="isKeyVisible = !isKeyVisible"
-            >
-              <EyeOff v-if="isKeyVisible" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
-          </div>
-        </label>
-
-        <label class="field">
-          <span>Modelo</span>
-          <input v-model="settings.model" type="text" placeholder="openrouter/owl-alpha" :disabled="!isLoaded" />
-        </label>
-
-        <button class="button secondary" type="submit" :disabled="isSaving || !isLoaded">
-          <LoaderCircle v-if="isSaving" class="spin" :size="16" aria-hidden="true" />
-          <Save v-else :size="16" aria-hidden="true" />
-          <span>{{ isSaving ? 'Salvando' : 'Salvar' }}</span>
+      <div v-if="authState" class="account-row">
+        <img v-if="authState.avatarUrl" :src="authState.avatarUrl" alt="" />
+        <div>
+          <span>Conectado como</span>
+          <strong>@{{ authState.login }}</strong>
+        </div>
+        <button class="icon-button" type="button" aria-label="Sair do GitHub" @click="signOut">
+          <LogOut :size="16" aria-hidden="true" />
         </button>
-      </form>
+      </div>
+
+      <button v-else class="button secondary" type="button" :disabled="isSigningIn" @click="signInWithGitHub">
+        <LoaderCircle v-if="isSigningIn" class="spin" :size="16" aria-hidden="true" />
+        <LogIn v-else :size="16" aria-hidden="true" />
+        <span>{{ isSigningIn ? 'Conectando' : 'Entrar com GitHub' }}</span>
+      </button>
     </section>
 
     <section class="panel sync-panel" aria-labelledby="sync-title">
@@ -171,10 +152,10 @@ function getErrorMessage(error: unknown): string {
       <div class="sync-grid" aria-live="polite">
         <div>
           <span>Status</span>
-          <strong>{{ syncStatus?.state ?? 'idle' }}</strong>
+          <strong>{{ canSync ? (syncStatus?.state ?? 'idle') : 'signed out' }}</strong>
         </div>
         <div>
-          <span>Globais</span>
+          <span>Abas</span>
           <strong>{{ syncStatus?.globalTabs ?? 0 }}</strong>
         </div>
         <div>

@@ -1,17 +1,13 @@
 import { browser } from 'wxt/browser';
 
-import type { OpenRouterSettings } from './settings';
+import type { GitHubAuthState } from './auth';
 
 export type ExtensionRequest =
-  | { type: 'settings:get' }
-  | { type: 'settings:save'; settings: Partial<OpenRouterSettings> }
   | { type: 'organize:run' }
-  | { type: 'sync:status:get' };
-
-export interface SettingsResponse {
-  settings: OpenRouterSettings;
-  hasApiKey: boolean;
-}
+  | { type: 'sync:status:get' }
+  | { type: 'auth:status:get' }
+  | { type: 'auth:github:start' }
+  | { type: 'auth:logout' };
 
 export interface OrganizationRunResponse {
   tabsAnalyzed: number;
@@ -31,6 +27,10 @@ export interface SyncStatusResponse {
   globalTabs: number;
   connectedClients: number;
   lastSyncedAt: string;
+}
+
+export interface AuthStatusResponse {
+  auth: GitHubAuthState | null;
 }
 
 export async function sendExtensionMessage<TResponse>(message: ExtensionRequest): Promise<TResponse> {

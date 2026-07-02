@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findSyncedDuplicateTabIds,
+  findStaleKnownSyncEntries,
   fingerprintForValue,
   normalizeSyncUrl,
   planRemoteStateApplication,
@@ -127,5 +128,29 @@ describe('findSyncedDuplicateTabIds', () => {
         new Set([1, 2, 3]),
       ),
     ).toEqual([2, 3]);
+  });
+});
+
+describe('findStaleKnownSyncEntries', () => {
+  it('returns known tabs that are no longer in the syncable local state', () => {
+    expect(
+      findStaleKnownSyncEntries(
+        [{ tabId: 1 }, { tabId: 3 }],
+        {
+          '1': 'tab-a',
+          '2': 'tab-b',
+          '4': 'tab-d',
+        },
+        {
+          '1': 'fingerprint-a',
+          '2': 'fingerprint-b',
+          '3': 'fingerprint-c',
+        },
+      ),
+    ).toEqual({
+      tabIds: [2, 4],
+      tabKeys: ['tab-b', 'tab-d'],
+      fingerprints: ['fingerprint-b'],
+    });
   });
 });
