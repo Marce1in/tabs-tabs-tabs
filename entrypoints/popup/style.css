@@ -17,6 +17,9 @@
   --line: #d6d2c8;
   --accent: #16745f;
   --accent-strong: #0f5a49;
+  --github: #1f2328;
+  --github-hover: #2f363d;
+  --github-muted: #59636e;
   --warning: #a35c00;
   --danger: #b42318;
   --shadow: 0 10px 28px rgba(40, 42, 37, 0.13);
@@ -107,6 +110,16 @@ input:disabled {
   letter-spacing: 0;
 }
 
+.auth-masthead {
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.auth-masthead h1 {
+  color: var(--github);
+  font-size: 21px;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -114,31 +127,33 @@ input:disabled {
   box-shadow: var(--shadow);
 }
 
+.auth-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-color: rgba(208, 215, 222, 0.92);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 14px 28px rgba(31, 35, 40, 0.12);
+}
+
+.auth-panel-loading {
+  min-height: 94px;
+  place-items: center;
+  color: var(--github-muted);
+}
+
 .settings-panel {
-  padding: 13px;
+  padding: 12px 13px;
 }
 
 .sync-panel {
-  padding: 13px;
+  padding: 10px 12px;
 }
 
-.section-heading,
 .result {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.section-heading {
-  margin-bottom: 12px;
-  color: var(--accent-strong);
-}
-
-.section-heading h2 {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1;
-  letter-spacing: 0;
 }
 
 .settings-form {
@@ -150,34 +165,35 @@ input:disabled {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 40px;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
 }
 
-.account-row img {
+.account-row img,
+.avatar-fallback {
   width: 34px;
   height: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.account-row img {
   object-fit: cover;
 }
 
-.account-row div {
+.avatar-fallback {
   display: grid;
-  min-width: 0;
-}
-
-.account-row span {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  place-items: center;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 900;
+  background: rgba(22, 116, 95, 0.1);
 }
 
 .account-row strong {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -225,6 +241,30 @@ input:disabled {
   padding: 10px 12px;
 }
 
+.github-login-button {
+  min-height: 46px;
+  gap: 10px;
+  color: #fff;
+  border-color: rgba(31, 35, 40, 0.9);
+  background: var(--github);
+  box-shadow: 0 8px 18px rgba(31, 35, 40, 0.18);
+}
+
+.github-login-button:hover:not(:disabled) {
+  background: var(--github-hover);
+}
+
+.github-login-button:focus,
+.github-login-button:focus-visible {
+  outline-color: rgba(31, 35, 40, 0.28);
+}
+
+.github-logo {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
 .icon-button {
   width: 40px;
   padding: 0;
@@ -253,35 +293,54 @@ input:disabled {
   display: grid;
 }
 
-.sync-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.sync-grid div {
-  display: grid;
-  gap: 3px;
+.sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  border: 1px solid rgba(22, 116, 95, 0.16);
-  border-radius: var(--radius);
-  padding: 8px;
-  background: rgba(22, 116, 95, 0.06);
 }
 
-.sync-grid span {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.sync-grid strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink);
+.sync-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--accent-strong);
   font-size: 12px;
-  line-height: 1.1;
+  font-weight: 800;
+}
+
+.sync-state span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.sync-state[data-state="connecting"],
+.sync-state[data-state="reconciling"] {
+  color: var(--warning);
+}
+
+.sync-state[data-state="disconnected"],
+.sync-state[data-state="idle"] {
+  color: var(--muted);
+}
+
+.sync-state[data-state="error"] {
+  color: var(--danger);
+}
+
+.sync-summary {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
