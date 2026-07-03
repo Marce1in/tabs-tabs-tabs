@@ -858,20 +858,41 @@ async function applyRemoteGroups(
     await browser.tabs.ungroup(toTabsApiTabIds(ungroupedTabIds)).catch(() => undefined);
   }
 
+  const groupMaps = await getGroupMaps();
+  const localGroupIdByKey = new Map<string, number>();
+  for (const [localGroupId, key] of Object.entries(groupMaps.byLocalGroupId)) {
+    localGroupIdByKey.set(key, Number(localGroupId));
+  }
+
   for (const [groupKey, tabIds] of groupedTabIds.entries()) {
     const group = groupByKey.get(groupKey);
     if (!group || tabIds.length === 0) continue;
 
-    const groupId = await (browser.tabs.group({
-      tabIds: toTabsApiTabIds(tabIds),
-    }) as unknown as Promise<number>);
+    // Reaproveita o grupo local já mapeado para esse groupKey, para atualizar
+    // o grupo existente no navegador em vez de recriá-lo a cada organização.
+    const existingGroupId = localGroupIdByKey.get(groupKey);
+    let groupId =
+      existingGroupId === undefined
+        ? undefined
+        : await (browser.tabs.group({
+            groupId: existingGroupId,
+            tabIds: toTabsApiTabIds(tabIds),
+          }) as unknown as Promise<number>).catch(() => undefined);
+
+    if (groupId === undefined) {
+      groupId = await (browser.tabs.group({
+        tabIds: toTabsApiTabIds(tabIds),
+      }) as unknown as Promise<number>);
+    }
 
     await browser.tabGroups.update(groupId, {
       title: group.title,
       color: group.color,
     });
 
-    const groupMaps = await getGroupMaps();
+    if (existingGroupId !== undefined && existingGroupId !== groupId) {
+      delete groupMaps.byLocalGroupId[String(existingGroupId)];
+    }
     groupMaps.byLocalGroupId[String(groupId)] = groupKey;
     await saveGroupMaps(groupMaps);
   }
