@@ -1,6 +1,6 @@
 declare module 'phoenix' {
   export class Socket {
-    constructor(endPoint: string, opts?: { params?: Record<string, unknown> });
+    constructor(endPoint: string, opts?: { params?: Record<string, unknown>; timeout?: number });
     channel(topic: string, chanParams?: Record<string, unknown>): Channel;
     connect(params?: Record<string, unknown>): void;
     disconnect(callback?: () => void, code?: number, reason?: string): void;

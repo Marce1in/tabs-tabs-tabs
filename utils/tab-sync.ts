@@ -13,6 +13,7 @@ const SYNC_TAB_MAP_KEY = 'tabsTabsTabs.syncTabFingerprints';
 const SYNC_CREATED_TAB_IDS_KEY = 'tabsTabsTabs.syncCreatedTabIds';
 const SYNC_GROUP_MAP_KEY = 'tabsTabsTabs.syncGroupKeys';
 const SYNC_PUBLISH_DEBOUNCE_MS = 650;
+const SYNC_PUSH_TIMEOUT_MS = 60_000;
 const REMOTE_EVENT_COOLDOWN_MS = 2000;
 const TAB_GROUP_ID_NONE = -1;
 const TAB_GROUP_COLORS = new Set(['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange']);
@@ -112,6 +113,7 @@ export function createTabSyncController(): TabSyncController {
     setStatus('connecting', 'Conectando ao sync.');
 
     socket = new Socket(getSyncSocketUrl(), {
+      timeout: SYNC_PUSH_TIMEOUT_MS,
       params: {
         auth_token: authState.token,
         client_id: clientId,
